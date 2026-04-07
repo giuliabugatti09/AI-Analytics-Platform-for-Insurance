@@ -1,0 +1,12 @@
+# .streamlit/config.toml
+
+[server]
+# Aumenta o limite de upload para 500 MB (ajuste este valor conforme sua necessidade)
+maxUploadSize = 500
+
+[theme]
+primaryColor="#ff5100ff"
+backgroundColor="#e9e9e9ff"
+secondaryBackgroundColor="#F0F2F6"
+textColor="#262730"
+font="sans serif"
