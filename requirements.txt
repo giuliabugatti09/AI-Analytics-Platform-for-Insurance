@@ -1,0 +1,16 @@
+streamlit
+pandas
+numpy
+requests
+joblib
+xlsxwriter
+scikit-learn==1.6.1
+pydeck
+tensorflow
+# rpy2 opcional: requer R instalado no sistema
+# rpy2==3.5.11
+google.generativeai
+plotly
+xgboost
+matplotlib
+seaborn
