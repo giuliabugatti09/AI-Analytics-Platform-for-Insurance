@@ -1,16 +1,26 @@
-streamlit
-pandas
-numpy
-requests
-joblib
-xlsxwriter
-scikit-learn==1.6.1
-pydeck
-tensorflow
-# rpy2 opcional: requer R instalado no sistema
-# rpy2==3.5.11
-google.generativeai
-plotly
-xgboost
-matplotlib
-seaborn
+# Data Manipulation & Analysis
+pandas>=2.2.0
+numpy>=1.26.0
+pathlib>=2.10.0
+
+# Machine Learning & Optimization
+scikit-learn>=1.4.0
+xgboost>=2.0.0
+lightgbm>=4.3.0
+joblib>=1.3.0
+
+# Handling Class Imbalance
+imbalanced-learn>=0.12.0
+
+# Explainability & Visualization
+shap>=0.45.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+plotly>=5.20.0
+
+# Web Interface
+streamlit>=1.50.0
+pillow>=10.2.0
+
+imblearn
+boruta
