@@ -1,0 +1,1 @@
+{"class_names": ["nao", "sim"], "img_size": [224, 224], "base_architecture": "EfficientNetV2-B0"}
