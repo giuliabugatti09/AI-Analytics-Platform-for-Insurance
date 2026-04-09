@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib  # Usado para carregar/salvar o modelo e outros objetos
+import joblib  # Used to load/save the model and other objects
 from sklearn.preprocessing import LabelEncoder
 import datetime
 import io
@@ -9,10 +9,11 @@ import warnings
 import traceback
 import plotly.graph_objects as go
 
-from components.Agente_Acidentes import renderizar_pagina_agente_acidentes # Importe a função que você criou
+from components.Agente_Acidentes import renderizar_pagina_agente_acidentes
+# Import the function you created
 
 
-# CSS personalizado para a aparência da página
+# Custom CSS for page appearance
 st.markdown("""
 <style>
     .main-header {
@@ -25,9 +26,9 @@ st.markdown("""
         font-weight: bold;
     }
     
-    /* --- BOTÕES PRINCIPAIS --- */
+    /* --- MAIN BUTTONS --- */
     .stButton>button {
-        background-color: #ff5100; /* Cor laranja principal */
+        background-color: #ff5100;
         color: white;
         font-weight: bold;
         border-radius: 10px;
@@ -37,8 +38,8 @@ st.markdown("""
         transition: all 0.3s;
     }
     .stButton>button:hover {
-        background-color: #D9480F; /* Laranja mais escuro no hover */
-        box-shadow: 0 5px 15px rgba(255, 81, 0, 0.3); /* Sombra laranja */
+        background-color: #D9480F;
+        box-shadow: 0 5px 15px rgba(255, 81, 0, 0.3);
     }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -53,303 +54,336 @@ st.markdown("""
         padding-top: 10px;
         padding-bottom: 10px;
     }
-    .stTabs [aria-selected="true"] {
-    }
+
     div[data-testid="stAlertContainer"] {
-    background-color: rgba(255, 81, 0, 0.15); /* Fundo laranja bem suave */
+        background-color: rgba(255, 81, 0, 0.15);
     }
 
-    /* 2. O parágrafo (texto) dentro do st.info */
-    div[data-testid="stAlertContentInfo"] p {
-        color: #D9480F; /* Texto em um tom de laranja mais escuro para legibilidade */
+    div[data-testid="stAlertContentInfo"] p,
     div[data-testid="stAlertContentSuccess"] p {
-        color: #D9480F; /* Texto em um tom de laranja mais escuro para legibilidade */
+        color: #D9480F;
     }
-
 </style>
 """, unsafe_allow_html=True)
 
 
 # ==============================================================================
-# FUNÇÃO DE PRÉ-PROCESSAMENTO PARA O UPLOAD
+# PREPROCESSING FUNCTION FOR FILE UPLOAD
 # ==============================================================================
 def pre_processamento_df_completo(df: pd.DataFrame) -> pd.DataFrame:
-    '''
-    Função de engenharia de atributos para dataset da PRF.
-    Recebe o DataFrame cru e retorna com novas features.
-    Otimizado para classes desbalanceadas com foco em acidentes fatais.
-    '''
+    """
+    Feature engineering function for PRF dataset.
+    Receives the raw DataFrame and returns it with new features.
+    Optimized for imbalanced classes with focus on fatal accidents.
+    """
 
     df = df.copy()
 
     # --------------------------
-    # 1. Processamento de datas (SIMPLIFICADO)
+    # 1. Date Processing (SIMPLIFIED)
     # --------------------------
-    df['data_inversa'] = pd.to_datetime(df['data_inversa'], format="%Y-%m-%d", errors='coerce')
+    df['data_inversa'] = pd.to_datetime(
+        df['data_inversa'], format="%Y-%m-%d", errors='coerce'
+    )
     df['ano'] = df['data_inversa'].dt.year
 
-    # Extração de componentes
     df['mes'] = df['data_inversa'].dt.month
     df['dia_semana_num'] = df['data_inversa'].dt.weekday
 
-    # Feature Binária
-    df['fim_semana'] = df['dia_semana_num'].isin([5,6]).astype(int)
+    df['fim_semana'] = df['dia_semana_num'].isin([5, 6]).astype(int)
 
-    # Transformações Cíclicas APENAS para mês
     df['mes_sin'] = np.sin(2 * np.pi * df['mes'] / 12)
-    df['mes_cos'] = np.cos(2 * np.pi * df['mes'] / 12)
-
+    df['mes_cos'] = np.cos(2 * np.pi * df['mes'] / 12) 
+# --------------------------
+    # 2. Time Processing (SIMPLIFIED)
     # --------------------------
-    # 2. Processamento de horário (SIMPLIFICADO)
-    # --------------------------
-    df['horario'] = pd.to_datetime(df['horario'], format="%H:%M:%S", errors='coerce')
+    df['horario'] = pd.to_datetime(
+        df['horario'], format="%H:%M:%S", errors='coerce'
+    )
     df['hora'] = df['horario'].dt.hour
     
-    # Criar períodos do dia
-    def periodo_do_dia(hora):
-        if pd.isna(hora): return np.nan
-        if 0 <= hora < 6: return "madrugada"
-        elif 6 <= hora < 12: return "manha"
-        elif 12 <= hora < 18: return "tarde"
-        else: return "noite"
-    df['periodo_dia'] = df['hora'].apply(periodo_do_dia)
-    
-    # Feature específica: Madrugada (período com mais acidentes fatais)
-    df['eh_madrugada'] = (df['periodo_dia'] == 'madrugada').astype(int)
+    def time_period(hour):
+        if pd.isna(hour):
+            return np.nan
+        if 0 <= hour < 6:
+            return "dawn"
+        elif 6 <= hour < 12:
+            return "morning"
+        elif 12 <= hour < 18:
+            return "afternoon"
+        else:
+            return "night"
+
+    df['periodo_dia'] = df['hora'].apply(time_period)
+
+    df['is_dawn'] = (df['periodo_dia'] == 'dawn').astype(int)
 
     # --------------------------
-    # 3. Categorização de veículos (COM MAIS DETALHES)
+    # 3. Vehicle Categorization (MORE DETAILED)
     # --------------------------
-    veiculos_leves = [
+    light_vehicles = [
         'Automóvel', 'Utilitário', 'Caminhonete'
     ]
     
-    veiculos_vulneraveis = [
-        'Motocicleta', 'Ciclomotor', 'Motoneta', 'Bicicleta', 'Triciclo'
+    vulnerable_vehicles = [
+        'Motocicleta', 'Ciclomotor',
+        'Motoneta', 'Bicicleta', 'Triciclo'
     ]
 
-    veiculos_pesados = [
-        'Caminhão', 'Caminhão-trator', 'Ônibus', 'Micro-ônibus', 
-        'Trator de rodas', 'Trator misto'
+    heavy_vehicles = [
+        'Caminhão', 'Caminhão-trator', 'Ônibus',
+        'Micro-ônibus', 'Trator de rodas', 'Trator misto'
     ]
 
     df['categoria_veiculo'] = np.where(
-        df['tipo_veiculo'].isin(veiculos_leves), 'leve',
-        np.where(df['tipo_veiculo'].isin(veiculos_vulneraveis), 'vulneravel',
-        np.where(df['tipo_veiculo'].isin(veiculos_pesados), 'pesado', 'outros'))
+        df['tipo_veiculo'].isin(light_vehicles), 'light',
+        np.where(
+            df['tipo_veiculo'].isin(vulnerable_vehicles), 'vulnerable',
+            np.where(df['tipo_veiculo'].isin(heavy_vehicles), 'heavy', 'other')
+        )
     )
-    
-    # Feature crítica: veículos vulneráveis (motos têm alta letalidade)
-    df['eh_veiculo_vulneravel'] = (df['categoria_veiculo'] == 'vulneravel').astype(int)
+
+    df['is_vulnerable_vehicle'] = (
+        df['categoria_veiculo'] == 'vulnerable'
+    ).astype(int)
 
     # --------------------------
-    # 4. Condições do acidente
+    # 4. Accident Conditions
     # --------------------------
-    visibilidade_ruim = ['Chuva','Garoa/Chuvisco','Nevoeiro/Neblina','Vento','Nublado']
-    df['visibilidade_ruim'] = df['condicao_metereologica'].isin(visibilidade_ruim).astype(int)
-
-    # --------------------------
-    # 5. FEATURES CRÍTICAS PARA ACIDENTES FATAIS
-    # --------------------------
-    
-    # Tipos de acidente com alta letalidade
-    acidentes_graves = [
-    "Atropelamento de Pedestre",
-    "Atropelamento de Animal",
-    "Capotamento",
-    "Colisão frontal",
-    "Colisão transversal",
-    "Colisão traseira",
-    "Colisão lateral sentido oposto",
-    "Saída de leito carroçável",
-    "Queda de ocupante de veículo",
-    "Tombamento",
-    "Incêndio"
+    poor_visibility = [
+        'Chuva', 'Garoa/Chuvisco',
+        'Nevoeiro/Neblina', 'Vento', 'Nublado'
     ]
-    
-    df['tipo_acidente_grave'] = df['tipo_acidente'].isin(acidentes_graves).astype(int)
-    
-    # Causas com alta letalidade
-    causas_criticas = [
-    "Ausência de reação do condutor",
-    "Reação tardia ou ineficiente do condutor",
-    "Velocidade Incompatível",
-    "Condutor Dormindo",
-    "Ingestão de álcool pelo condutor",
-    "Ingestão de substâncias psicoativas pelo condutor",
-    "Transitar na contramão",
-    "Ultrapassagem Indevida",
-    "Condutor usando celular",
-    "Manobra de mudança de faixa",
-    "Condutor deixou de manter distância do veículo da frente",
-    "Condutor desrespeitou a iluminação vermelha do semáforo",
-    "Participar de racha",
-    "Mal súbito do condutor",
-    "Atropelamento por entrada inopinada do pedestre",
-    "Pedestre cruzava a pista fora da faixa",
-    "Pedestre andava na pista"
+
+    df['poor_visibility'] = (
+        df['condicao_metereologica']
+        .isin(poor_visibility)
+        .astype(int)
+    )
+
+    # --------------------------
+    # 5. CRITICAL FEATURES FOR FATAL ACCIDENTS
+    # --------------------------
+    severe_accidents = [
+        "Atropelamento de Pedestre",
+        "Atropelamento de Animal",
+        "Capotamento",
+        "Colisão frontal",
+        "Colisão transversal",
+        "Colisão traseira",
+        "Colisão lateral sentido oposto",
+        "Saída de leito carroçável",
+        "Queda de ocupante de veículo",
+        "Tombamento",
+        "Incêndio"
     ]
-    
-    df['causa_critica'] = df['causa_principal'].isin(causas_criticas).astype(int)
-    
-    # Traçados perigosos
-    tracados_perigosos = [
-    "Curva",
-    "Curva;Aclive",
-    "Curva;Declive",
-    "Curva;Interseção de Vias",
-    "Curva;Rotatória",
-    "Declive",
-    "Declive;Curva",
-    "Declive;Interseção de Vias",
-    "Declive;Rotatória",
-    "Interseção de Vias",
-    "Rotatória",
-    "Viaduto;Curva",
-    "Viaduto;Declive",
-    "Ponte;Curva",
-    "Ponte;Declive",
-    "Túnel;Curva",
-    "Túnel;Declive"
+
+    df['severe_accident_type'] = (
+        df['tipo_acidente']
+        .isin(severe_accidents)
+        .astype(int)
+    )
+
+    critical_causes = [
+        "Ausência de reação do condutor",
+        "Reação tardia ou ineficiente do condutor",
+        "Velocidade Incompatível",
+        "Condutor Dormindo",
+        "Ingestão de álcool pelo condutor",
+        "Ingestão de substâncias psicoativas pelo condutor",
+        "Transitar na contramão",
+        "Ultrapassagem Indevida",
+        "Condutor usando celular",
+        "Manobra de mudança de faixa",
+        "Condutor deixou de manter distância do veículo da frente",
+        "Condutor desrespeitou a iluminação vermelha do semáforo",
+        "Participar de racha",
+        "Mal súbito do condutor",
+        "Atropelamento por entrada inopinada do pedestre",
+        "Pedestre cruzava a pista fora da faixa",
+        "Pedestre andava na pista"
     ]
-    
-    df['tracado_perigoso'] = df['tracado_via'].str.contains('|'.join(tracados_perigosos), case=False, na=False).astype(int)
-    
-    # Pista simples (mais acidentes fatais)
-    df['pista_simples'] = df['tipo_pista'].str.contains('Simples', case=False, na=False).astype(int)
 
-    # --------------------------
-    # 6. INTERAÇÕES DE ALTO RISCO (FOCO EM FATALIDADE)
-    # --------------------------
-    
-    # Interação 1: Tipo de acidente grave + veículo vulnerável (CRÍTICO para motos)
-    df['acidente_grave_x_vulneravel'] = (
-        (df['tipo_acidente_grave'] == 1) & 
-        (df['eh_veiculo_vulneravel'] == 1)
-    ).astype(int)
-    
-    # Interação 2: Colisão frontal (extremamente letal)
-    df['eh_colisao_frontal'] = (
-        df['tipo_acidente'].str.contains('frontal', case=False, na=False)
-    ).astype(int)
-    
-    # Interação 3: Velocidade + visibilidade ruim
-    df['velocidade_x_visibilidade'] = (
-        df['causa_principal'].str.contains('velocidade', case=False, na=False) & 
-        (df['visibilidade_ruim'] == 1)
-    ).astype(int)
-    
-    # Interação 4: Álcool/Drogas (fator crítico)
-    df['eh_alcool_drogas'] = (
-        df['causa_principal'].str.contains('álcool|drogas', case=False, na=False)
-    ).astype(int)
-    
-    # Interação 5: Madrugada + fim de semana (padrão de acidentes fatais)
-    df['madrugada_fds'] = (
-        (df['eh_madrugada'] == 1) & (df['fim_semana'] == 1)
-    ).astype(int)
-    
-    # Interação 6: Visibilidade ruim + período noturno
-    df['visibilidade_ruim_periodo_dia'] = (
-        (df['visibilidade_ruim'] == 1) & 
-        (df['periodo_dia'].isin(['noite', 'madrugada']))
-    ).astype(int)
-    
-    # Interação 7: Veículo pesado + pista simples
-    df['veiculo_pesado_pista_simples'] = (
-        (df['categoria_veiculo'] == 'pesado') & 
-        (df['pista_simples'] == 1)
-    ).astype(int)
-    
-    # Interação 8: Traçado perigoso + visibilidade ruim
-    df['tracado_perigoso_x_visibilidade'] = (
-        (df['tracado_perigoso'] == 1) & (df['visibilidade_ruim'] == 1)
-    ).astype(int)
-    
-    # Interação 9: Tipo acidente + causa (específica)
-    df['tipo_acidente_x_causa'] = (
-        df['tipo_acidente'].astype(str) + '_' + df['causa_principal'].astype(str)
-    )
-    
-    # Interação 10: Categoria veículo + tipo acidente
-    df['categoria_veiculo_x_tipo_acidente'] = (
-        df['categoria_veiculo'].astype(str) + '_' + df['tipo_acidente'].astype(str)
+    df['critical_cause'] = (
+        df['causa_principal']
+        .isin(critical_causes)
+        .astype(int)
     )
 
+    # Dangerous road layouts
+    dangerous_layouts = [
+        "Curva",
+        "Curva;Aclive",
+        "Curva;Declive",
+        "Curva;Interseção de Vias",
+        "Curva;Rotatória",
+        "Declive",
+        "Declive;Curva",
+        "Declive;Interseção de Vias",
+        "Declive;Rotatória",
+        "Interseção de Vias",
+        "Rotatória",
+        "Viaduto;Curva",
+        "Viaduto;Declive",
+        "Ponte;Curva",
+        "Ponte;Declive",
+        "Túnel;Curva",
+        "Túnel;Declive"
+    ]
+
+    df['dangerous_layout'] = (
+        df['tracado_via']
+        .str.contains('|'.join(dangerous_layouts), case=False, na=False)
+        .astype(int)
+    )
+
+    df['single_lane'] = (
+        df['tipo_pista']
+        .str.contains('Simples', case=False, na=False)
+        .astype(int)
+    ) 
+# --------------------------
+    # 6. HIGH-RISK INTERACTIONS (FOCUS ON FATALITY)
     # --------------------------
-    # 7. SCORE DE RISCO DE FATALIDADE (agregado)
-    # --------------------------
-    df['score_risco_fatal'] = (
-        df['tipo_acidente_grave'] * 3 +           # Peso 3
-        df['causa_critica'] * 2 +                 # Peso 2
-        df['eh_veiculo_vulneravel'] * 2 +         # Peso 2
-        df['eh_colisao_frontal'] * 3 +            # Peso 3
-        df['eh_alcool_drogas'] * 2 +              # Peso 2
-        df['visibilidade_ruim'] +                 # Peso 1
-        df['madrugada_fds'] +                     # Peso 1
-        df['tracado_perigoso'] +                  # Peso 1
-        df['pista_simples']                       # Peso 1
+
+    # Interaction 1: Severe accident type + vulnerable vehicle
+    df['severe_accident_x_vulnerable'] = (
+        (df['severe_accident_type'] == 1) &
+        (df['is_vulnerable_vehicle'] == 1)
+    ).astype(int)
+
+    # Interaction 2: Head-on collision (extremely lethal)
+    df['is_head_on_collision'] = (
+        df['tipo_acidente']
+        .str.contains('frontal', case=False, na=False)
+    ).astype(int)
+
+    # Interaction 3: Speed + poor visibility
+    df['speed_x_visibility'] = (
+        df['causa_principal']
+        .str.contains('velocidade', case=False, na=False) &
+        (df['poor_visibility'] == 1)
+    ).astype(int)
+
+    # Interaction 4: Alcohol / Drugs
+    df['is_alcohol_drugs'] = (
+        df['causa_principal']
+        .str.contains('álcool|drogas', case=False, na=False)
+    ).astype(int)
+
+    # Interaction 5: Dawn + weekend
+    df['dawn_weekend'] = (
+        (df['is_dawn'] == 1) &
+        (df['fim_semana'] == 1)
+    ).astype(int)
+
+    # Interaction 6: Poor visibility + night or dawn
+    df['poor_visibility_x_period'] = (
+        (df['poor_visibility'] == 1) &
+        (df['periodo_dia'].isin(['night', 'dawn']))
+    ).astype(int)
+
+    # Interaction 7: Heavy vehicle + single lane road
+    df['heavy_vehicle_single_lane'] = (
+        (df['categoria_veiculo'] == 'heavy') &
+        (df['single_lane'] == 1)
+    ).astype(int)
+
+    # Interaction 8: Dangerous layout + poor visibility
+    df['dangerous_layout_x_visibility'] = (
+        (df['dangerous_layout'] == 1) &
+        (df['poor_visibility'] == 1)
+    ).astype(int)
+
+    # Interaction 9: Accident type + cause
+    df['accident_type_x_cause'] = (
+        df['tipo_acidente'].astype(str) + '_' +
+        df['causa_principal'].astype(str)
+    )
+
+    # Interaction 10: Vehicle category + accident type
+    df['vehicle_category_x_accident_type'] = (
+        df['categoria_veiculo'].astype(str) + '_' +
+        df['tipo_acidente'].astype(str)
     )
 
     # --------------------------
-    # 8. Drop de colunas originais usadas
+    # 7. FATALITY RISK SCORE (AGGREGATED)
+    # --------------------------
+    df['fatality_risk_score'] = (
+        df['severe_accident_type'] * 3 +
+        df['critical_cause'] * 2 +
+        df['is_vulnerable_vehicle'] * 2 +
+        df['is_head_on_collision'] * 3 +
+        df['is_alcohol_drugs'] * 2 +
+        df['poor_visibility'] +
+        df['dawn_weekend'] +
+        df['dangerous_layout'] +
+        df['single_lane']
+    )
+
+    # --------------------------
+    # 8. DROP ORIGINAL COLUMNS USED
     # --------------------------
     drop_cols = [
         'data_inversa', 'horario',
         'ano_fabricacao_veiculo', 'tipo_veiculo',
-        'idade', 'condicao_metereologica', 'id', 'pesid',
-        'id_veiculo', 'marca', 'km', 'latitude', 'longitude',
-        'municipio','delegacia', 'uop', 'regional',
-        'estado_fisico', 'ilesos', 'feridos_leves',
-        'hora', 'feridos_graves', 'mortos', 'sexo', 'mes',
-        'dia', 'dia_semana_num', 'dia_semana', 'causa_acidente',
-        'ordem_tipo_acidente', 'tipo_envolvido', 'ano'
+        'idade', 'condicao_metereologica',
+        'id', 'pesid', 'id_veiculo',
+        'marca', 'km', 'latitude', 'longitude',
+        'municipio', 'delegacia', 'uop',
+        'regional', 'estado_fisico',
+        'ilesos', 'feridos_leves',
+        'hora', 'feridos_graves', 'mortos',
+        'sexo', 'mes', 'dia',
+        'dia_semana_num', 'dia_semana',
+        'causa_acidente', 'ordem_tipo_acidente',
+        'tipo_envolvido', 'ano'
     ]
-    df = df.drop(columns=[c for c in drop_cols if c in df.columns])
 
-    return df
+    df = df.drop(
+        columns=[c for c in drop_cols if c in df.columns]
+    )
 
+    return df 
 # ==============================================================================
-# 1. BASE DE DADOS AUXILIAR (DE-PARA)
-# Esta é a base que mapeia (UF, BR) para suas características.
-# Em um projeto real, isso viria de uma fonte de dados mais robusta.
-# Para o nosso app, podemos começar com este exemplo.
+# 1. AUXILIARY DATABASE (MAPPING)
+# Maps (State, BR) to road characteristics.
 # ==============================================================================
-@st.cache_data # Decorator mágico do Streamlit!
+@st.cache_data
 def carregar_dados_brs():
     """
-    Lê o arquivo CSV com as características das BRs e o mantém em cache.
+    Reads the CSV file with BR characteristics and caches it.
     """
-    df = pd.read_csv('caracteristicas_brs.csv')
+    df = pd.read_csv('data/caracteristicas_brs.csv')
     return df
 
+
 # ==============================================================================
-# 2. FUNÇÃO DE PRÉ-PROCESSAMENTO PARA A PREVISAO DA ROTA
+# 2. PREPROCESSING FUNCTION FOR ROUTE PREDICTION
 # ==============================================================================
 def pre_processamento_df_manual(
-    data_hora_viagem: datetime, 
-    tipo_veiculo_usuario: str, 
-    condicao_visibilidade_usuario: str, 
-    rota: list, 
+    data_hora_viagem: datetime,
+    tipo_veiculo_usuario: str,
+    condicao_visibilidade_usuario: str,
+    rota: list,
     db_brs: pd.DataFrame
 ) -> pd.DataFrame:
-    '''
-    Prepara os dados de input do Streamlit para o modelo de previsão.
+    """
+    Prepares Streamlit input data for the prediction model.
 
     Args:
-        data_hora_viagem (datetime): Data e hora da viagem informada pelo usuário.
-        tipo_veiculo_usuario (str): Categoria do veículo (ex: 'Motocicleta').
-        condicao_visibilidade_usuario (str): Condição de visibilidade (ex: 'Chuva ou Neblina').
-        rota (list): Lista de dicionários, onde cada um representa um trecho. Ex: [{'uf': 'SP', 'br': 116}].
-        db_brs (pd.DataFrame): DataFrame com as características das BRs.
+        data_hora_viagem (datetime): Travel start date and time.
+        tipo_veiculo_usuario (str): Vehicle type.
+        condicao_visibilidade_usuario (str): Visibility condition.
+        rota (list): List of route segments.
+        db_brs (pd.DataFrame): BR characteristics database.
 
     Returns:
-        pd.DataFrame: DataFrame processado e pronto para a previsão.
-    '''
-    
-    # --- ETAPA A: DEFINIR CENÁRIOS DE RISCO ---
-    # Como não temos o tipo/causa do acidente, vamos simular cenários críticos
-    # para avaliar a robustez da rota a diferentes tipos de perigo.
+        pd.DataFrame: Processed DataFrame ready for prediction.
+    """
+
+    # --- STEP A: DEFINE RISK SCENARIOS ---
     cenarios_de_risco = [
         {'tipo_acidente': 'Colisão frontal', 'causa_principal': 'Velocidade Incompatível'},
         {'tipo_acidente': 'Saída de leito carroçável', 'causa_principal': 'Condutor Dormindo'},
@@ -357,52 +391,45 @@ def pre_processamento_df_manual(
         {'tipo_acidente': 'Colisão traseira', 'causa_principal': 'Falta de Atenção à Condução'}
     ]
 
-    # --- ETAPA B: CONSTRUIR O DATAFRAME A PARTIR DOS INPUTS DO USUÁRIO ---
+    # --- STEP B: BUILD DATAFRAME FROM USER INPUTS ---
     dados_para_prever = []
 
     for trecho in rota:
-        # Busca as características da BR no nosso "banco de dados"
-        info_br = db_brs[(db_brs['uf'] == trecho['uf']) & (db_brs['br'] == trecho['br'])]
+        info_br = db_brs[
+            (db_brs['uf'] == trecho['uf']) &
+            (db_brs['br'] == trecho['br'])
+        ]
 
         if not info_br.empty:
             tipo_pista = info_br.iloc[0]['tipo_pista']
             tracado_via = info_br.iloc[0]['tracado_via']
         else:
-            # Valores padrão caso a BR não seja encontrada
             tipo_pista = 'Simples'
             tracado_via = 'Reta'
             
-        # Para cada trecho da rota, criamos uma linha para cada cenário de risco
         for cenario in cenarios_de_risco:
             linha = {
-                # Inputs diretos da viagem
                 'data_inversa': data_hora_viagem.strftime('%Y-%m-%d'),
                 'horario': data_hora_viagem.strftime('%H:%M:%S'),
                 'tipo_veiculo': tipo_veiculo_usuario,
                 'condicao_metereologica': condicao_visibilidade_usuario,
-                # Inputs baseados na rota
                 'uf': trecho['uf'],
                 'br': trecho['br'],
                 'tipo_pista': tipo_pista,
                 'tracado_via': tracado_via,
-                # Inputs do cenário de risco simulado
                 'tipo_acidente': cenario['tipo_acidente'],
                 'causa_principal': cenario['causa_principal']
             }
             dados_para_prever.append(linha)
 
     if not dados_para_prever:
-        return pd.DataFrame() # Retorna DF vazio se a rota estiver vazia
+        return pd.DataFrame()
 
     df = pd.DataFrame(dados_para_prever)
-    
-    # =================================================================================
-    # --- ETAPA C: APLICAR A SUA LÓGICA DE ENGENHARIA DE FEATURES ORIGINAL ---
-    # O código abaixo é 99% idêntico ao que você enviou. Apenas adaptamos
-    # os nomes das variáveis para o contexto do Streamlit.
-    # =================================================================================
 
-    # 1. Processamento de datas
+    # -------------------------------------------------------------------------
+    # STEP C: APPLY ORIGINAL FEATURE ENGINEERING LOGIC
+    # -------------------------------------------------------------------------
     df['data_inversa'] = pd.to_datetime(df['data_inversa'], format="%Y-%m-%d")
     df['mes'] = df['data_inversa'].dt.month
     df['dia_semana_num'] = df['data_inversa'].dt.weekday
@@ -410,321 +437,385 @@ def pre_processamento_df_manual(
     df['mes_sin'] = np.sin(2 * np.pi * df['mes'] / 12)
     df['mes_cos'] = np.cos(2 * np.pi * df['mes'] / 12)
 
-    # 2. Processamento de horário
     df['horario'] = pd.to_datetime(df['horario'], format="%H:%M:%S")
     df['hora'] = df['horario'].dt.hour
-    
-    def periodo_do_dia(hora):
-        if 0 <= hora < 6: return "madrugada"
-        elif 6 <= hora < 12: return "manha"
-        elif 12 <= hora < 18: return "tarde"
-        else: return "noite"
-    df['periodo_dia'] = df['hora'].apply(periodo_do_dia)
-    df['eh_madrugada'] = (df['periodo_dia'] == 'madrugada').astype(int)
 
-    # 3. Categorização de veículos
-    veiculos_vulneraveis = ['Motocicleta', 'Ciclomotor', 'Motoneta', 'Bicicleta']
-    veiculos_pesados = ['Caminhão', 'Caminhão-trator', 'Ônibus', 'Micro-ônibus']
-    
+    def time_period(hour):
+        if 0 <= hour < 6: return "dawn"
+        elif 6 <= hour < 12: return "morning"
+        elif 12 <= hour < 18: return "afternoon"
+        else: return "night"
+
+    df['periodo_dia'] = df['hora'].apply(time_period)
+    df['is_dawn'] = (df['periodo_dia'] == 'dawn').astype(int)
+
+    vulnerable_vehicles = ['Motocicleta', 'Ciclomotor', 'Motoneta', 'Bicicleta']
+    heavy_vehicles = ['Caminhão', 'Caminhão-trator', 'Ônibus', 'Micro-ônibus']
+
     df['categoria_veiculo'] = np.where(
-        df['tipo_veiculo'].isin(veiculos_vulneraveis), 'vulneravel',
-        np.where(df['tipo_veiculo'].isin(veiculos_pesados), 'pesado', 'leve') # 'leve' é o default
-    )
-    df['eh_veiculo_vulneravel'] = (df['categoria_veiculo'] == 'vulneravel').astype(int)
-
-    # 4. Condições do acidente
-    visibilidade_ruim_map = ['Chuva ou Neblina', 'Poeira ou Fumaça']
-    df['visibilidade_ruim'] = df['condicao_metereologica'].isin(visibilidade_ruim_map).astype(int)
-
-    # 5. Features críticas (baseadas nos cenários)
-    acidentes_graves = ["Atropelamento de Pedestre", "Capotamento", "Colisão frontal", "Saída de leito carroçável"]
-    df['tipo_acidente_grave'] = df['tipo_acidente'].isin(acidentes_graves).astype(int)
-    
-    causas_criticas = ["Velocidade Incompatível", "Condutor Dormindo", "Ingestão de álcool pelo condutor", "Transitar na contramão"]
-    df['causa_critica'] = df['causa_principal'].isin(causas_criticas).astype(int)
-    
-    tracados_perigosos = ["Curva", "Curva;Aclive", "Curva;Declive", "Declive"]
-    df['tracado_perigoso'] = df['tracado_via'].isin(tracados_perigosos).astype(int)
-    
-    df['pista_simples'] = df['tipo_pista'].str.contains('Simples', case=False, na=False).astype(int)
-
-    # 6. Interações de alto risco
-    df['acidente_grave_x_vulneravel'] = ((df['tipo_acidente_grave'] == 1) & (df['eh_veiculo_vulneravel'] == 1)).astype(int)
-    df['eh_colisao_frontal'] = (df['tipo_acidente'].str.contains('frontal', case=False, na=False)).astype(int)
-    df['velocidade_x_visibilidade'] = (df['causa_principal'].str.contains('velocidade', case=False, na=False) & (df['visibilidade_ruim'] == 1)).astype(int)
-    df['eh_alcool_drogas'] = (df['causa_principal'].str.contains('álcool|drogas', case=False, na=False)).astype(int)
-    df['madrugada_fds'] = ((df['eh_madrugada'] == 1) & (df['fim_semana'] == 1)).astype(int)
-    df['visibilidade_ruim_periodo_dia'] = ((df['visibilidade_ruim'] == 1) & (df['periodo_dia'].isin(['noite', 'madrugada']))).astype(int)
-    df['veiculo_pesado_pista_simples'] = ((df['categoria_veiculo'] == 'pesado') & (df['pista_simples'] == 1)).astype(int)
-    df['tracado_perigoso_x_visibilidade'] = ((df['tracado_perigoso'] == 1) & (df['visibilidade_ruim'] == 1)).astype(int)
-    df['tipo_acidente_x_causa'] = df['tipo_acidente'].astype(str) + '_' + df['causa_principal'].astype(str)
-    df['categoria_veiculo_x_tipo_acidente'] = df['categoria_veiculo'].astype(str) + '_' + df['tipo_acidente'].astype(str)
-
-    # 7. Score de Risco
-    df['score_risco_fatal'] = (
-        df['tipo_acidente_grave'] * 3 +
-        df['causa_critica'] * 2 +
-        df['eh_veiculo_vulneravel'] * 2 +
-        df['eh_colisao_frontal'] * 3 +
-        df['eh_alcool_drogas'] * 2 +
-        df['visibilidade_ruim'] +
-        df['madrugada_fds'] +
-        df['tracado_perigoso'] +
-        df['pista_simples']
+        df['tipo_veiculo'].isin(vulnerable_vehicles), 'vulnerable',
+        np.where(df['tipo_veiculo'].isin(heavy_vehicles), 'heavy', 'light')
     )
 
-    # 8. Drop de colunas originais
-    drop_cols = [
-        'data_inversa', 'horario', 'tipo_veiculo', 'condicao_metereologica',
-        'hora', 'mes', 'dia_semana_num'
+    df['is_vulnerable_vehicle'] = (df['categoria_veiculo'] == 'vulnerable').astype(int)
+
+    poor_visibility_map = ['Chuva ou Neblina', 'Poeira ou Fumaça']
+    df['poor_visibility'] = df['condicao_metereologica'].isin(poor_visibility_map).astype(int) 
+# 5. Critical features (based on simulated scenarios)
+    severe_accidents = [
+        "Atropelamento de Pedestre",
+        "Capotamento",
+        "Colisão frontal",
+        "Saída de leito carroçável"
     ]
-    df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors='ignore')
 
-    return df
+    df['severe_accident_type'] = (
+        df['tipo_acidente']
+        .isin(severe_accidents)
+        .astype(int)
+    )
 
-# --- Carregamento dos Modelos e Objetos ---
+    critical_causes = [
+        "Velocidade Incompatível",
+        "Condutor Dormindo",
+        "Ingestão de álcool pelo condutor",
+        "Transitar na contramão"
+    ]
+
+    df['critical_cause'] = (
+        df['causa_principal']
+        .isin(critical_causes)
+        .astype(int)
+    )
+
+    dangerous_layouts = [
+        "Curva",
+        "Curva;Aclive",
+        "Curva;Declive",
+        "Declive"
+    ]
+
+    df['dangerous_layout'] = (
+        df['tracado_via']
+        .isin(dangerous_layouts)
+        .astype(int)
+    )
+
+    df['single_lane'] = (
+        df['tipo_pista']
+        .str.contains('Simples', case=False, na=False)
+        .astype(int)
+    )
+
+    # 6. High-risk interactions
+    df['severe_accident_x_vulnerable'] = (
+        (df['severe_accident_type'] == 1) &
+        (df['is_vulnerable_vehicle'] == 1)
+    ).astype(int)
+
+    df['is_head_on_collision'] = (
+        df['tipo_acidente']
+        .str.contains('frontal', case=False, na=False)
+    ).astype(int)
+
+    df['speed_x_visibility'] = (
+        df['causa_principal']
+        .str.contains('velocidade', case=False, na=False) &
+        (df['poor_visibility'] == 1)
+    ).astype(int)
+
+    df['is_alcohol_drugs'] = (
+        df['causa_principal']
+        .str.contains('álcool|drogas', case=False, na=False)
+    ).astype(int)
+
+    df['dawn_weekend'] = (
+        (df['is_dawn'] == 1) &
+        (df['fim_semana'] == 1)
+    ).astype(int)
+
+    df['poor_visibility_x_period'] = (
+        (df['poor_visibility'] == 1) &
+        (df['periodo_dia'].isin(['night', 'dawn']))
+    ).astype(int)
+
+    df['heavy_vehicle_single_lane'] = (
+        (df['categoria_veiculo'] == 'heavy') &
+        (df['single_lane'] == 1)
+    ).astype(int)
+
+    df['dangerous_layout_x_visibility'] = (
+        (df['dangerous_layout'] == 1) &
+        (df['poor_visibility'] == 1)
+    ).astype(int)
+
+    df['accident_type_x_cause'] = (
+        df['tipo_acidente'].astype(str) + '_' +
+        df['causa_principal'].astype(str)
+    )
+
+    df['vehicle_category_x_accident_type'] = (
+        df['categoria_veiculo'].astype(str) + '_' +
+        df['tipo_acidente'].astype(str)
+    )
+
+    # 7. Risk score
+    df['fatality_risk_score'] = (
+        df['severe_accident_type'] * 3 +
+        df['critical_cause'] * 2 +
+        df['is_vulnerable_vehicle'] * 2 +
+        df['is_head_on_collision'] * 3 +
+        df['is_alcohol_drugs'] * 2 +
+        df['poor_visibility'] +
+        df['dawn_weekend'] +
+        df['dangerous_layout'] +
+        df['single_lane']
+    )
+
+    # 8. Drop original columns
+    drop_cols = [
+        'data_inversa', 'horario', 'tipo_veiculo',
+        'condicao_metereologica', 'hora',
+        'mes', 'dia_semana_num'
+    ]
+
+    df = df.drop(
+        columns=[c for c in drop_cols if c in df.columns],
+        errors='ignore'
+    )
+
+    return df 
+# --- Load Models and Objects ---
 @st.cache_resource
 def load_objects():
-    """Carrega o modelo e os dicionários de encoders do disco."""
+    """Loads the model and encoder dictionaries from disk."""
     try:
-        model = joblib.load('modelo_gravidade_xgb.pkl')
-        feature_encoders = joblib.load('label_encoders_xgb.pkl')
-        target_encoder = joblib.load('target_encoder_xgb.pkl')
-        selected_features = joblib.load('colunas_modelo_xgb.pkl')
-        return model, feature_encoders, target_encoder, selected_features
-    except FileNotFoundError:
-        return None, None, None
+        model = joblib.load('models/modelo_gravidade_xgb.pkl')
+        feature_encoders = joblib.load('models/label_encoders_xgb.pkl')
+        target_encoder = joblib.load('models/target_encoder_xgb.pkl')
+        selected_features = joblib.load('models/colunas_modelo_xgb.pkl')
 
-# --- Lógica de Previsão Unificada (Corrigida) ---
+        return model, feature_encoders, target_encoder, selected_features
+
+    except FileNotFoundError as e:
+        st.error(f"Model file not found: {e.filename}")
+        return None, None, None, None
+    except Exception as e:
+        st.error(f"Error loading objects: {e}")
+        return None, None, None, None
+
+
+# --- Unified Prediction Logic (Corrected) ---
 def fazer_previsao_df_completo(df_input, model, feature_encs, selected_features):
     """
-    Função unificada para pré-processar, codificar, selecionar features e prever.
-    
+    Unified function to preprocess, encode, select features, and predict.
+
     Args:
-        df_input (pd.DataFrame): Dados brutos de entrada.
-        model: O modelo treinado (LGBMClassifier).
-        feature_encs (dict): Dicionário de LabelEncoders salvos.
-        selected_features (list): Lista de features que o modelo final espera.
-        
+        df_input (pd.DataFrame): Raw input data.
+        model: Trained model.
+        feature_encs (dict): Dictionary of saved LabelEncoders.
+        selected_features (list): List of features expected by the model.
+
     Returns:
-        np.array: Probabilidades de cada classe.
+        np.array: Class probabilities.
     """
-    print("Iniciando pré-processamento para inferência...")
-    
-    # 1. Pré-processamento e Engenharia de Features
-    # (A função 'pre_processamento_df_completo' deve incluir todas as transformações cíclicas)
+    print("Starting preprocessing for inference...")
+
     df_processed = pre_processamento_df_completo(df_input.copy())
-    
-    # 2. Codificação (Label Encoding com tratamento de desconhecidos)
     df_encoded = df_processed.copy()
-    
+
     for col, encoder in feature_encs.items():
         if col in df_encoded.columns:
-            # Substituir valores desconhecidos por um valor de placeholder (-1) 
-            # antes de usar o encoder, se a coluna for categórica (object)
-            
-            # Criar um set de classes conhecidas para acesso rápido
             known_classes = set(encoder.classes_)
-            
-            # Função para mapear: se for conhecido, usa transform, senão, usa um placeholder
+
             def safe_transform(value):
-                # O encoder só pode transformar valores que ele viu no treino.
                 if value in known_classes:
                     return encoder.transform([value])[0]
                 else:
-                    # Usar um valor que o modelo já viu (ex: o valor mais frequente)
-                    # ou uma flag. Aqui, usamos 99999 como um placeholder grande e único.
-                    # É crucial que este valor seja tratado corretamente no treino.
-                    return -1 
-            
-            # Aplica a transformação segura
+                    return -1
+
             df_encoded[col] = df_encoded[col].astype(str).apply(safe_transform)
 
+    X_to_predict = df_encoded.drop(
+        'classificacao_acidente', axis=1, errors='ignore'
+    )
 
-    # 3. Preparação Final do DataFrame para o Modelo
-    # Remove a coluna alvo, se ela existir nos dados de entrada
-    X_to_predict = df_encoded.drop('classificacao_acidente', axis=1, errors='ignore')
-    
-    # Selecionar apenas as features que o modelo espera, na ordem correta
     try:
         X_final = X_to_predict[selected_features]
     except KeyError as e:
-        print(f"Erro: Feature '{e}' não encontrada após o pré-processamento. Verifique se o seu 'preprocessamento_df_completo' está correto.")
+        print(
+            f"Error: Feature '{e}' not found after preprocessing."
+        )
         return None
 
-    # 4. Fazer a Previsão
     probabilities = model.predict_proba(X_final)
-    print("Previsões concluídas.")
-    
+    print("Predictions completed.")
+
     return probabilities
 
-# --- Função de Previsão para Entrada Manual (Robusta) ---
-def fazer_previsao_df_manual(df_processado: pd.DataFrame, model, feature_encs: dict, selected_features: list) -> np.array:
+
+# --- Prediction Function for Manual Input ---
+def fazer_previsao_df_manual(
+    df_processado: pd.DataFrame,
+    model,
+    feature_encs: dict,
+    selected_features: list
+) -> np.array:
     """
-    Realiza a previsão a partir de um DataFrame já pré-processado.
-    Responsável por:
-    1. Codificar features categóricas usando encoders pré-treinados.
-    2. Alinhar as colunas do DataFrame com as esperadas pelo modelo.
-    3. Retornar as probabilidades da previsão.
+    Performs prediction from a preprocessed DataFrame.
 
-    Args:
-        df_processado (pd.DataFrame): DataFrame após a etapa de engenharia de features.
-        model: Modelo treinado (XGBoost/LightGBM).
-        feature_encs (dict): Dicionário de LabelEncoders salvos do treinamento.
-        selected_features (list): Lista exata de features que o modelo espera, na ordem correta.
-
-    Returns:
-        np.array: Array com as probabilidades de cada classe, ou None em caso de erro.
+    Steps:
+    1. Encode categorical features.
+    2. Align columns with model expectations.
+    3. Return class probabilities.
     """
     warnings.filterwarnings('ignore')
-    
+
     try:
-        # Etapa 1: Codificação com tratamento de valores desconhecidos
         df_encoded = df_processado.copy()
-        
+
         for col in df_encoded.columns:
-            if col in feature_encs:  # Apenas codifica colunas que têm um encoder
+            if col in feature_encs:
                 encoder = feature_encs[col]
                 known_classes = set(encoder.classes_)
-                
-                # Aplica a transformação, tratando valores que não estavam no treino
+
                 df_encoded[col] = df_encoded[col].apply(
-                    lambda x: encoder.transform([str(x)])[0] if str(x) in known_classes else -1
+                    lambda x: encoder.transform([str(x)])[0]
+                    if str(x) in known_classes else -1
                 )
-        
-        # Etapa 2: Garantir que todas as features do modelo existam no DataFrame
-        # Adiciona colunas faltantes com valor 0 (ou outro valor padrão)
+
         for feat in selected_features:
             if feat not in df_encoded.columns:
-                df_encoded[feat] = 0 # Valor padrão para features ausentes
-        
-        # Etapa 3: Selecionar e ordenar as features exatamente como o modelo espera
-        X_final = df_encoded[selected_features]
-        
-        # Etapa 4: Fazer a previsão
-        probabilities = model.predict_proba(X_final)
-        
-        return probabilities
-        
-    except Exception as e:
-        st.error(f"Ocorreu um erro durante a previsão: {e}")
-        traceback.print_exc()
-        return None
+                df_encoded[feat] = 0
 
+        X_final = df_encoded[selected_features]
+        probabilities = model.predict_proba(X_final)
+
+        return probabilities
+
+    except Exception as e:
+        st.error(f"An error occurred during prediction: {e}")
+        traceback.print_exc()
+        return None 
 def rederizar_pagina_upload_arquivo():
-    st.sidebar.header("Parâmetros de Entrada")
+    st.sidebar.header("Input Parameters")
     uploaded_file = st.sidebar.file_uploader(
-        "Selecione o arquivo CSV", 
+        "Select CSV file",
         type="csv",
-        help="Faça upload de um arquivo CSV com dados de acidentes"
+        help="Upload a CSV file with accident data"
     )
     
     if uploaded_file:
         try:
-            # Tenta ler como UTF-8
             file_content = uploaded_file.getvalue()
             
             try:
-                # Tenta decodificar com UTF-8 (o padrão esperado)
                 data_string = file_content.decode('utf-8')
-                st.success("Arquivo lido como UTF-8")
+                st.success("File read as UTF-8")
                 data_io = io.StringIO(data_string)
-                df_input = pd.read_csv(data_io, sep=',') 
+                df_input = pd.read_csv(data_io, sep=',')
             except UnicodeDecodeError:
-                # Se falhar, tenta LATIN-1 (comum em arquivos brasileiros)
                 data_string = file_content.decode('latin-1')
-                st.warning("Arquivo lido usando codificação LATIN-1")
+                st.warning("File read using LATIN-1 encoding")
                 data_io = io.StringIO(data_string)
                 df_input = pd.read_csv(data_io, sep=';')
 
             # ==========================================
-            # SEÇÃO 1: INFORMAÇÕES DO DATASET
+            # SECTION 1: DATASET INFORMATION
             # ==========================================
-            st.header("Análise do Dataset Carregado")
+            st.header("Loaded Dataset Analysis")
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Total de Registros", f"{len(df_input):,}")
+                st.metric("Total Records", f"{len(df_input):,}")
             with col2:
-                st.metric("Total de Colunas", len(df_input.columns))
+                st.metric("Total Columns", len(df_input.columns))
             with col3:
-                memoria_mb = df_input.memory_usage(deep=True).sum() / 1024**2
-                st.metric("Tamanho em Memória", f"{memoria_mb:.1f} MB")
+                memory_mb = df_input.memory_usage(deep=True).sum() / 1024**2
+                st.metric("Memory Size", f"{memory_mb:.1f} MB")
             with col4:
-                missing_pct = (df_input.isnull().sum().sum() / (len(df_input) * len(df_input.columns))) * 100
-                st.metric("% Dados Faltantes", f"{missing_pct:.1f}%")
+                missing_pct = (
+                    df_input.isnull().sum().sum() /
+                    (len(df_input) * len(df_input.columns))
+                ) * 100
+                st.metric("Missing Data %", f"{missing_pct:.1f}%")
             
-            # Amostra dos dados
-            with st.expander("Visualizar Amostra dos Dados (Primeiras 10 linhas)", expanded=False):
+            with st.expander("View Data Sample (First 10 rows)", expanded=False):
                 st.dataframe(df_input.head(10), use_container_width=True)
             
-            # Aviso de processamento pesado
             if len(df_input) > 100000:
                 st.warning(
-                    f"O arquivo contém {len(df_input):,} linhas. "
-                    "O processamento pode demorar alguns minutos. "
-                    "Considere processar uma amostra menor para testes rápidos."
+                    f"The file contains {len(df_input):,} rows. "
+                    "Processing may take a few minutes."
                 )
                 
-                # Opção para processar amostra
-                usar_amostra = st.checkbox(
-                    "Processar apenas uma amostra aleatória de 10.000 registros",
+                use_sample = st.checkbox(
+                    "Process only a random sample of 10,000 records",
                     value=False
                 )
-                if usar_amostra:
+                if use_sample:
                     df_input = df_input.sample(n=10000, random_state=42)
-                    st.info(f"Processando amostra de {len(df_input):,} registros")
+                    st.info(f"Processing sample of {len(df_input):,} records")
 
             # ==========================================
-            # SEÇÃO 2: PROCESSAMENTO E PREVISÕES
+            # SECTION 2: PROCESSING AND PREDICTIONS
             # ==========================================
-            st.header("Previsões de Gravidade")
+            st.header("Severity Predictions")
             
-            with st.spinner('Aplicando pré-processamento e fazendo previsões...'):
+            with st.spinner('Applying preprocessing and generating predictions...'):
                 import time
                 start_time = time.time()
                 
                 probabilities = fazer_previsao_df_completo(
                     df_input,
                     modelo,
-                    encoder_features, 
+                    encoder_features,
                     colunas_modelo
                 )
                 
-                tempo_processamento = time.time() - start_time
+                processing_time = time.time() - start_time
                 
-                # Criar DataFrame com resultados
-                df_results = pd.DataFrame(probabilities, columns=nomes_das_classes)
+                df_results = pd.DataFrame(
+                    probabilities,
+                    columns=nomes_das_classes
+                )
 
-                # Garantir que todas as colunas são numéricas
                 for col in nomes_das_classes:
-                    df_results[col] = pd.to_numeric(df_results[col], errors='coerce')
+                    df_results[col] = pd.to_numeric(
+                        df_results[col], errors='coerce'
+                    )
 
-                # Adicionar classe predita
-                df_results['Classe_Predita'] = df_results[nomes_das_classes].idxmax(axis=1)
-                df_results['Confianca'] = df_results[nomes_das_classes].max(axis=1)
+                df_results['Predicted_Class'] = (
+                    df_results[nomes_das_classes].idxmax(axis=1)
+                )
+                df_results['Confidence'] = (
+                    df_results[nomes_das_classes].max(axis=1)
+                )
 
-                # Adicionar ao dataframe original
                 df_input_com_pred = df_input.copy()
-                df_input_com_pred['Gravidade_Predita'] = df_results['Classe_Predita'].values
-                df_input_com_pred['Confianca_Predicao'] = df_results['Confianca'].values
+                df_input_com_pred['Predicted_Severity'] = (
+                    df_results['Predicted_Class'].values
+                )
+                df_input_com_pred['Prediction_Confidence'] = (
+                    df_results['Confidence'].values
+                )
             
-            st.success(f"Previsão concluída em {tempo_processamento:.2f} segundos!")
-            
+            st.success(
+                f"Prediction completed in {processing_time:.2f} seconds!"
+            ) 
+# ==========================================
+            # SECTION 3: PREDICTION DISTRIBUTION
             # ==========================================
-            # SEÇÃO 3: DISTRIBUIÇÃO DAS PREVISÕES
-            # ==========================================
-            st.subheader("Distribuição das Previsões")
+            st.subheader("Prediction Distribution")
             
             col1, col2 = st.columns(2)
             
             with col1:
-                # Contagem de classes preditas
-                contagem_classes = df_results['Classe_Predita'].value_counts()
+                class_counts = df_results['Predicted_Class'].value_counts()
                 
                 fig_pie = go.Figure(data=[go.Pie(
-                    labels=contagem_classes.index,
-                    values=contagem_classes.values,
+                    labels=class_counts.index,
+                    values=class_counts.values,
                     hole=0.4,
                     marker=dict(colors=['#2ca02c', "#ffdb0e", '#d62728']),
                     textinfo='label+percent',
@@ -732,7 +823,7 @@ def rederizar_pagina_upload_arquivo():
                 )])
                 
                 fig_pie.update_layout(
-                    title='Distribuição de Gravidade dos Acidentes',
+                    title='Accident Severity Distribution',
                     height=400,
                     showlegend=True
                 )
@@ -740,11 +831,10 @@ def rederizar_pagina_upload_arquivo():
                 st.plotly_chart(fig_pie, use_container_width=True)
             
             with col2:
-                # Gráfico de barras
                 fig_bar = go.Figure(data=[go.Bar(
-                    x=contagem_classes.index,
-                    y=contagem_classes.values,
-                    text=contagem_classes.values,
+                    x=class_counts.index,
+                    y=class_counts.values,
+                    text=class_counts.values,
                     textposition='auto',
                     marker=dict(
                         color=['#2ca02c', "#ffdb0e", '#d62728'],
@@ -753,150 +843,164 @@ def rederizar_pagina_upload_arquivo():
                 )])
                 
                 fig_bar.update_layout(
-                    title='Quantidade por Gravidade',
-                    xaxis_title='Gravidade',
-                    yaxis_title='Quantidade de Acidentes',
+                    title='Accident Count by Severity',
+                    xaxis_title='Severity',
+                    yaxis_title='Number of Accidents',
                     height=400
                 )
                 
                 st.plotly_chart(fig_bar, use_container_width=True)
             
-            # Métricas de distribuição
-            st.markdown("### Estatísticas de Distribuição")
+            # Distribution metrics
+            st.markdown("### Distribution Statistics")
             col1, col2, col3 = st.columns(3)
             
             total = len(df_results)
-            for i, (col, classe) in enumerate(zip([col1, col2, col3], nomes_das_classes)):
-                count = contagem_classes.get(classe, 0)
-                pct = (count / total) * 100
+            for col, severity in zip([col1, col2, col3], nomes_das_classes):
+                count = class_counts.get(severity, 0)
+                pct = (count / total) * 100 if total > 0 else 0
                 with col:
                     st.metric(
-                        classe,
-                        f"{count:,} ({pct:.1f}%)",
-                        delta=None
+                        severity,
+                        f"{count:,} ({pct:.1f}%)"
                     )
             
             # ==========================================
-            # SEÇÃO 4: ANÁLISE DE CONFIANÇA
+            # SECTION 4: CONFIDENCE ANALYSIS
             # ==========================================
-            st.subheader("Análise de Confiança das Previsões")
+            st.subheader("Prediction Confidence Analysis")
             
-            # Histograma de confiança
             fig_hist = go.Figure()
             
-            for classe in nomes_das_classes:
-                mask = df_results['Classe_Predita'] == classe
-                confidences = df_results[mask]['Confianca']
+            for severity in nomes_das_classes:
+                mask = df_results['Predicted_Class'] == severity
+                confidences = df_results.loc[mask, 'Confidence']
                 
                 fig_hist.add_trace(go.Histogram(
                     x=confidences * 100,
-                    name=classe,
+                    name=severity,
                     opacity=0.7,
                     nbinsx=30
                 ))
             
             fig_hist.update_layout(
-                title='Distribuição de Confiança por Classe',
-                xaxis_title='Confiança (%)',
-                yaxis_title='Frequência',
+                title='Confidence Distribution by Class',
+                xaxis_title='Confidence (%)',
+                yaxis_title='Frequency',
                 barmode='overlay',
                 height=400
             )
             
             st.plotly_chart(fig_hist, use_container_width=True)
             
-            # Estatísticas de confiança
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Confiança Média", f"{df_results['Confianca'].mean():.1%}")
+                st.metric(
+                    "Average Confidence",
+                    f"{df_results['Confidence'].mean():.1%}"
+                )
             with col2:
-                st.metric("Confiança Mediana", f"{df_results['Confianca'].median():.1%}")
+                st.metric(
+                    "Median Confidence",
+                    f"{df_results['Confidence'].median():.1%}"
+                )
             with col3:
-                baixa_confianca = (df_results['Confianca'] < 0.5).sum()
-                st.metric("Previsões Baixa Confiança (<50%)", f"{baixa_confianca:,}")
-            
+                low_conf = (df_results['Confidence'] < 0.5).sum()
+                st.metric(
+                    "Low Confidence Predictions (<50%)",
+                    f"{low_conf:,}"
+                ) 
+# ==========================================
+            # SECTION 5: CRITICAL CASES (FATAL)
             # ==========================================
-            # SEÇÃO 5: CASOS CRÍTICOS (FATAIS)
-            # ==========================================
-            casos_fatais = df_results[df_results['Classe_Predita'] == 'Com Vítimas Fatais']
+            fatal_cases = df_results[
+                df_results['Predicted_Class'] == 'Com Vítimas Fatais'
+            ]
             
-            if len(casos_fatais) > 0:
-                st.subheader(f"Análise de Casos Fatais ({len(casos_fatais):,} casos)")
+            if len(fatal_cases) > 0:
+                st.subheader(
+                    f"Fatal Accident Analysis ({len(fatal_cases):,} cases)"
+                )
                 
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    # Confiança dos casos fatais
-                    confianca_media_fatal = casos_fatais['Confianca'].mean()
-                    confianca_alta = (casos_fatais['Confianca'] >= 0.7).sum()
+                    avg_conf_fatal = fatal_cases['Confidence'].mean()
+                    high_conf = (fatal_cases['Confidence'] >= 0.7).sum()
                     
                     st.metric(
-                        "Confiança Média (Fatais)",
-                        f"{confianca_media_fatal:.1%}"
+                        "Average Confidence (Fatal)",
+                        f"{avg_conf_fatal:.1%}"
                     )
                     st.metric(
-                        "Casos com Alta Confiança (≥70%)",
-                        f"{confianca_alta:,}"
+                        "High Confidence Cases (≥70%)",
+                        f"{high_conf:,}"
                     )
                 
                 with col2:
-                    # Distribuição de probabilidades para casos fatais
                     fig_box = go.Figure()
                     
-                    for classe in nomes_das_classes:
+                    for severity in nomes_das_classes:
                         fig_box.add_trace(go.Box(
-                            y=casos_fatais[classe] * 100,
-                            name=classe,
+                            y=fatal_cases[severity] * 100,
+                            name=severity,
                             boxmean='sd'
                         ))
                     
                     fig_box.update_layout(
-                        title='Distribuição de Probabilidades (Casos Fatais)',
-                        yaxis_title='Probabilidade (%)',
+                        title='Probability Distribution (Fatal Cases)',
+                        yaxis_title='Probability (%)',
                         height=300
                     )
                     
-                    st.plotly_chart(fig_box, use_container_width=True)
+                    st.plotly_chart(
+                        fig_box,
+                        use_container_width=True
+                    )
             
             # ==========================================
-            # SEÇÃO 6: TABELA DE PROBABILIDADES
+            # SECTION 6: DETAILED PROBABILITY TABLE
             # ==========================================
-            st.subheader("Tabela de Probabilidades Detalhada")
+            st.subheader("Detailed Probability Table")
             
-            # Opções de filtro
             col1, col2 = st.columns(2)
             with col1:
-                filtro_classe = st.multiselect(
-                    "Filtrar por Classe Predita",
+                class_filter = st.multiselect(
+                    "Filter by Predicted Class",
                     options=nomes_das_classes,
                     default=nomes_das_classes
                 )
             with col2:
-                min_confianca = st.slider(
-                    "Confiança Mínima (%)",
+                min_conf = st.slider(
+                    "Minimum Confidence (%)",
                     min_value=0,
                     max_value=100,
                     value=0,
                     step=5
                 ) / 100
             
-            # Aplicar filtros
             mask = (
-                df_results['Classe_Predita'].isin(filtro_classe) &
-                (df_results['Confianca'] >= min_confianca)
+                df_results['Predicted_Class'].isin(class_filter) &
+                (df_results['Confidence'] >= min_conf)
             )
-            df_filtrado = df_results[mask]
+            df_filtered = df_results[mask]
             
-            st.info(f"Mostrando {len(df_filtrado):,} de {len(df_results):,} registros")
+            st.info(
+                f"Showing {len(df_filtered):,} of "
+                f"{len(df_results):,} records"
+            )
             
-            # Mostrar tabela estilizada
             st.dataframe(
-                df_filtrado.style.format({
-                    col: "{:.2%}" for col in nomes_das_classes + ['Confianca']
-                }).background_gradient(
+                df_filtered.style
+                .format({
+                    col: "{:.2%}"
+                    for col in nomes_das_classes + ['Confidence']
+                })
+                .background_gradient(
                     cmap='RdYlGn_r',
                     subset=nomes_das_classes
-                ).highlight_max(
+                )
+                .highlight_max(
                     axis=1,
                     subset=nomes_das_classes,
                     props='font-weight: bold; border: 2px solid green;'
@@ -906,77 +1010,86 @@ def rederizar_pagina_upload_arquivo():
             )
             
             # ==========================================
-            # SEÇÃO 7: DOWNLOAD DOS RESULTADOS
+            # SECTION 7: DOWNLOAD RESULTS
             # ==========================================
-            st.subheader("Exportar Resultados")
+            st.subheader("Export Results")
             
             col1, col2 = st.columns(2)
             
             with col1:
-                # Download apenas probabilidades
-                csv_probs = df_results.to_csv(index=False).encode('utf-8')
+                csv_probs = (
+                    df_results
+                    .to_csv(index=False)
+                    .encode('utf-8')
+                )
                 st.download_button(
-                    label="Download Probabilidades (CSV)",
+                    label="Download Probabilities (CSV)",
                     data=csv_probs,
-                    file_name="probabilidades_acidentes.csv",
+                    file_name="accident_probabilities.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
             
             with col2:
-                # Download dataset completo com previsões
-                csv_completo = df_input_com_pred.to_csv(index=False).encode('utf-8')
+                csv_full = (
+                    df_input_com_pred
+                    .to_csv(index=False)
+                    .encode('utf-8')
+                )
                 st.download_button(
-                    label="Download Dataset Completo + Previsões (CSV)",
-                    data=csv_completo,
-                    file_name="dataset_com_previsoes.csv",
+                    label="Download Full Dataset + Predictions (CSV)",
+                    data=csv_full,
+                    file_name="dataset_with_predictions.csv",
                     mime="text/csv",
                     use_container_width=True
-                )
-            
-            # ==========================================
-            # SEÇÃO 8: ANÁLISE ADICIONAL (SE HOUVER COLUNAS RELEVANTES)
+                ) 
+# ==========================================
+            # SECTION 8: ADDITIONAL ANALYSIS (GEOGRAPHIC)
             # ==========================================
             if 'uf' in df_input.columns:
-                st.subheader("Análise Geográfica")
+                st.subheader("Geographic Analysis")
                 
-                # Criar tabela de análise por UF
-                df_geo = df_input_com_pred.groupby('uf').agg({
-                    'Gravidade_Predita': lambda x: x.value_counts().to_dict(),
-                    'Confianca_Predicao': 'mean'
-                }).reset_index()
+                df_geo = (
+                    df_input_com_pred
+                    .groupby('uf')
+                    .agg({
+                        'Predicted_Severity': lambda x: x.value_counts().to_dict(),
+                        'Prediction_Confidence': 'mean'
+                    })
+                    .reset_index()
+                )
                 
-                # Expandir dicionário de contagem
-                gravidade_por_uf = []
+                severity_by_state = []
                 for _, row in df_geo.iterrows():
-                    uf = row['uf']
-                    counts = row['Gravidade_Predita']
-                    for gravidade, count in counts.items():
-                        gravidade_por_uf.append({
-                            'UF': uf,
-                            'Gravidade': gravidade,
-                            'Quantidade': count
+                    state = row['uf']
+                    counts = row['Predicted_Severity']
+                    for severity, count in counts.items():
+                        severity_by_state.append({
+                            'State': state,
+                            'Severity': severity,
+                            'Count': count
                         })
                 
-                df_geo_expanded = pd.DataFrame(gravidade_por_uf)
+                df_geo_expanded = pd.DataFrame(severity_by_state)
                 
-                # Gráfico de barras empilhadas por UF
                 fig_geo = go.Figure()
                 
-                for gravidade in nomes_das_classes:
-                    df_temp = df_geo_expanded[df_geo_expanded['Gravidade'] == gravidade]
+                for severity in nomes_das_classes:
+                    df_temp = df_geo_expanded[
+                        df_geo_expanded['Severity'] == severity
+                    ]
                     fig_geo.add_trace(go.Bar(
-                        name=gravidade,
-                        x=df_temp['UF'],
-                        y=df_temp['Quantidade'],
-                        text=df_temp['Quantidade'],
+                        name=severity,
+                        x=df_temp['State'],
+                        y=df_temp['Count'],
+                        text=df_temp['Count'],
                         textposition='auto'
                     ))
                 
                 fig_geo.update_layout(
-                    title='Distribuição de Gravidade por Estado',
-                    xaxis_title='Estado (UF)',
-                    yaxis_title='Quantidade de Acidentes',
+                    title='Severity Distribution by State',
+                    xaxis_title='State (UF)',
+                    yaxis_title='Number of Accidents',
                     barmode='stack',
                     height=500
                 )
@@ -986,303 +1099,432 @@ def rederizar_pagina_upload_arquivo():
             st.balloons()
 
         except Exception as e:
-            st.error(f"Ocorreu um erro durante o processamento: {e}")
+            st.error(f"An error occurred during processing: {e}")
             st.error(
-                "Verifique se o arquivo CSV tem o formato esperado e "
-                "todas as colunas necessárias."
+                "Please verify that the CSV file has the expected format "
+                "and all required columns."
             )
             
-            with st.expander("Ver Detalhes do Erro"):
-                import traceback
+            with st.expander("View Error Details"):
                 st.code(traceback.format_exc())
     
     else:
         st.markdown("---")
-        st.info("Aguardando o upload de um arquivo CSV...")
+        st.info("Waiting for CSV file upload...")
         
-        # Instruções quando não há arquivo
         st.markdown("""
-        ### Como usar:
+        ### How to use:
         
-        1. Clique no botão **"Browse files"** na barra lateral
-        2. Selecione um arquivo CSV com dados de acidentes
-        3. O arquivo será automaticamente processado e analisado
-        4. Visualize as previsões, gráficos e estatísticas gerados
-        5. Faça download dos resultados quando necessário
+        1. Click **\"Browse files\"** in the sidebar
+        2. Select a CSV file with accident data
+        3. The file will be automatically processed
+        4. View predictions, charts, and statistics
+        5. Download results if needed
         
-        ### Formato esperado do arquivo:
+        ### Expected file format:
         
-        O arquivo CSV deve conter as seguintes colunas principais:
-        - `data_inversa`: Data do acidente (formato YYYY-MM-DD)
-        - `horario`: Horário do acidente (formato HH:MM:SS)
-        - `uf`: Estado onde ocorreu o acidente
-        - `tipo_veiculo`: Tipo de veículo envolvido
-        - `tipo_acidente`: Tipo de acidente
-        - `causa_principal`: Causa principal do acidente
-        - E outras colunas relevantes...
+        The CSV file must contain the following main columns:
+        - `data_inversa`: Accident date (YYYY-MM-DD)
+        - `horario`: Accident time (HH:MM:SS)
+        - `uf`: State
+        - `tipo_veiculo`: Vehicle type
+        - `tipo_acidente`: Accident type
+        - `causa_principal`: Main cause
         
-        ### Dicas:
-        - Para arquivos grandes (>100k linhas), considere usar a opção de amostragem
-        - Os resultados podem ser baixados em formato CSV
-        - Use os filtros para explorar casos específicos
-        """)
-
+        ### Tips:
+        - For large files (>100k rows), consider sampling
+        - Results can be downloaded as CSV
+        - Use filters to explore specific cases
+        """) 
 def renderizar_pagina_entrada_manual():
     st.set_page_config(
-    page_title="Modelos de Predição - Análise de Acidentes",
-    layout="wide",
-)   
-    tab1, tab2 = st.tabs(["**Fazer Previsão**", "**Histórico de Previsão de Rotas**"])
-    with tab1:
-        st.header("Modo: Previsão de Risco por Rota")
-        st.info("Planeje sua viagem! Adicione os trechos de BRs que você irá percorrer e veja uma análise de risco baseada nas condições da sua viagem.")
+        page_title="Prediction Models - Accident Analysis",
+        layout="wide",
+    )
 
-        # Inicializa a rota na sessão se não existir
+    tab1, tab2 = st.tabs(
+        ["**Run Prediction**", "**Route Prediction History**"]
+    )
+
+    with tab1:
+        st.header("Mode: Route Risk Prediction")
+        st.info(
+            "Plan your trip! Add the BR segments you will travel through "
+            "and get a risk analysis based on your trip conditions."
+        )
+
         if 'rota' not in st.session_state:
             st.session_state.rota = []
-        if 'historico_rotas' not in st.session_state: # <--- NOVO: Inicializa o histórico
+        if 'historico_rotas' not in st.session_state:
             st.session_state.historico_rotas = []
 
-        # --- NOVA FUNÇÃO DE CALLBACK ---
         def carregar_rota_selecionada():
-            """Callback para carregar a rota pré-definida no session_state."""
-            nome_da_rota = st.session_state.rotas_selectbox # Acessa o valor do selectbox pela sua chave
-            if nome_da_rota in ROTAS_PREDEFINIDAS:
-                st.session_state.rota = ROTAS_PREDEFINIDAS[nome_da_rota]
+            selected_route = st.session_state.rotas_selectbox
+            if selected_route in ROTAS_PREDEFINIDAS:
+                st.session_state.rota = ROTAS_PREDEFINIDAS[selected_route]
 
         col1, col2 = st.columns([1, 1])
 
         with col1:
-            st.subheader("🗓️ Parâmetros da Viagem")
+            st.subheader("🗓️ Trip Parameters")
+
             data_hora_viagem = st.date_input(
-                "Data e Hora de Início da Viagem",
+                "Trip Start Date and Time",
                 datetime.datetime.now()
             )
+
             tipo_veiculo_usuario = st.selectbox(
-                "Seu Tipo de Veículo",
+                "Your Vehicle Type",
                 ['Automóvel', 'Motocicleta', 'Caminhão', 'Ônibus', 'Utilitário']
             )
+
             condicao_visibilidade_usuario = st.selectbox(
-                "Condições de Visibilidade",
-                ['Tempo Bom (Céu Claro/Nublado)', 'Chuva ou Neblina', 'Poeira ou Fumaça']
+                "Visibility Conditions",
+                [
+                    'Tempo Bom (Céu Claro/Nublado)',
+                    'Chuva ou Neblina',
+                    'Poeira ou Fumaça'
+                ]
             )
 
         with col2:
-            st.subheader("Monte sua Rota")
+            st.subheader("Build Your Route")
 
-            # --- NOVO SELECTBOX PARA ROTAS PRÉ-DEFINIDAS ---
             st.selectbox(
-                label="Ou escolha uma rota sugerida (isso substituirá a rota atual):",
+                label="Or choose a suggested route (this will replace the current route):",
                 options=list(ROTAS_PREDEFINIDAS.keys()),
-                key="rotas_selectbox",  # Chave para acessar o valor no session_state
-                on_change=carregar_rota_selecionada # A mágica acontece aqui!
+                key="rotas_selectbox",
+                on_change=carregar_rota_selecionada
             )
 
             st.markdown("---")
 
             with st.form("form_add_trecho"):
-                ufs = sorted(db_brs['uf'].unique()) if db_brs is not None else ['SP']
-                uf_selecionada = st.selectbox("UF do Trecho", ufs)
-                br_selecionada = st.number_input("Número da BR", min_value=1, max_value=499, step=1, value=116)
-                submitted = st.form_submit_button("Adicionar Trecho")
+                ufs = (
+                    sorted(db_brs['uf'].unique())
+                    if db_brs is not None else ['SP']
+                )
+
+                uf_selecionada = st.selectbox("Segment State (UF)", ufs)
+                br_selecionada = st.number_input(
+                    "BR Number",
+                    min_value=1,
+                    max_value=499,
+                    step=1,
+                    value=116
+                )
+
+                submitted = st.form_submit_button("Add Segment")
 
                 if submitted:
-                    st.session_state.rota.append({'uf': uf_selecionada, 'br': int(br_selecionada)})
-                    st.success(f"Trecho BR-{br_selecionada}/{uf_selecionada} adicionado!")
+                    st.session_state.rota.append(
+                        {'uf': uf_selecionada, 'br': int(br_selecionada)}
+                    )
+                    st.success(
+                        f"Segment BR-{br_selecionada}/{uf_selecionada} added!"
+                    )
 
         if st.session_state.rota:
-            st.write("**Rota Atual:**")
+            st.write("**Current Route:**")
             df_rota = pd.DataFrame(st.session_state.rota)
             st.dataframe(df_rota, use_container_width=True)
 
-            if st.button("Limpar Rota"):
+            if st.button("Clear Route"):
                 st.session_state.rota = []
                 st.rerun()
 
-        if st.button("**Analisar Rota Completa**", type="primary", use_container_width=True):
+        if st.button(
+            "**Analyze Full Route**",
+            type="primary",
+            use_container_width=True
+        ):
             if not st.session_state.rota:
-                st.warning("Por favor, adicione pelo menos um trecho à rota.")
+                st.warning(
+                    "Please add at least one route segment."
+                )
 
             elif modelo is None or db_brs is None:
-                st.error("Aplicação não inicializada corretamente. Verifique os arquivos de modelo e dados.")
+                st.error(
+                    "Application not properly initialized. "
+                    "Check model and data files."
+                )
 
             else:
-                with st.spinner('🔄 Analisando rota e calculando riscos...'):
-                    # ETAPA 1: Pré-processamento
+                with st.spinner(
+                    '🔄 Analyzing route and calculating risks...'
+                ):
                     df_processado = pre_processamento_df_manual(
                         data_hora_viagem=data_hora_viagem,
                         tipo_veiculo_usuario=tipo_veiculo_usuario,
                         condicao_visibilidade_usuario=condicao_visibilidade_usuario,
                         rota=st.session_state.rota,
                         db_brs=db_brs
-                    )
-
-                    # ETAPA 2: Previsão
-                    probabilidades = fazer_previsao_df_manual(
+                    ) 
+# STEP 2: Prediction
+                    probabilities = fazer_previsao_df_manual(
                         df_processado=df_processado,
                         model=modelo,
                         feature_encs=encoder_features,
                         selected_features=colunas_modelo
                     )
 
-                    if probabilidades is not None:
-                        st.success("✅ Análise de risco concluída!")
-                        # Calcula a média das probabilidades em todos os trechos e cenários
-                        risco_agregado = np.mean(probabilidades, axis=0)   
+                    if probabilities is not None:
+                        st.success("✅ Risk analysis completed!")
 
-                        # --- NOVO: SALVAR RESULTADO NO HISTÓRICO ---
-                        classe_predita = nomes_das_classes[risco_agregado.argmax()]
-                        prob_predita = risco_agregado.max()
-                        
-                        registro_historico = {
+                        # Aggregate probabilities across all segments and scenarios
+                        aggregated_risk = np.mean(probabilities, axis=0)
+
+                        predicted_class = nomes_das_classes[
+                            aggregated_risk.argmax()
+                        ]
+                        predicted_prob = aggregated_risk.max()
+
+                        history_record = {
                             "timestamp": datetime.datetime.now(),
-                            "rota": pd.DataFrame(st.session_state.rota),
-                            "parametros": {
-                                "Data": data_hora_viagem.strftime('%d/%m/%Y %H:%M'),
-                                "Veículo": tipo_veiculo_usuario,
-                                "Visibilidade": condicao_visibilidade_usuario
+                            "route": pd.DataFrame(st.session_state.rota),
+                            "parameters": {
+                                "Date": data_hora_viagem.strftime('%d/%m/%Y %H:%M'),
+                                "Vehicle": tipo_veiculo_usuario,
+                                "Visibility": condicao_visibilidade_usuario
                             },
-                            "risco_agregado": risco_agregado,
-                            "classe_predita": classe_predita,
-                            "prob_predita": prob_predita
+                            "aggregated_risk": aggregated_risk,
+                            "predicted_class": predicted_class,
+                            "predicted_prob": predicted_prob
                         }
-                        st.session_state.historico_rotas.insert(0, registro_historico) # Insere no início da lista
 
-                        # ETAPA 3: Agregar e Exibir Resultados
-                        st.subheader("📊 Risco Agregado para a Rota")
-                        st.write("O risco geral da rota é a média das probabilidades em todos os trechos e cenários de risco simulados.")
+                        st.session_state.historico_rotas.insert(
+                            0, history_record
+                        )
 
-                        df_results = pd.DataFrame([risco_agregado], columns=nomes_das_classes)
+                        # STEP 3: Display aggregated results
+                        st.subheader("📊 Aggregated Route Risk")
+                        st.write(
+                            "Overall route risk is the average probability "
+                            "across all segments and simulated risk scenarios."
+                        )
+
+                        df_results = pd.DataFrame(
+                            [aggregated_risk],
+                            columns=nomes_das_classes
+                        )
 
                         st.dataframe(
-                            df_results.style.format("{:.2%}").background_gradient(cmap='YlOrRd', axis=1),
+                            df_results.style
+                            .format("{:.2%}")
+                            .background_gradient(
+                                cmap='YlOrRd',
+                                axis=1
+                            ),
                             use_container_width=True
                         )
 
-                        # Gráfico de barras (adaptado da sua visualização)
                         fig = go.Figure(data=[go.Bar(
-                            x=nomes_das_classes, y=risco_agregado * 100,
-                            text=[f'{p:.1f}%' for p in risco_agregado * 100], textposition='auto',
-                            marker_color=['#d62728', "#ffdb0e", '#2ca02c'] # Verde, Laranja, Vermelho
+                            x=nomes_das_classes,
+                            y=aggregated_risk * 100,
+                            text=[
+                                f'{p:.1f}%' for p in aggregated_risk * 100
+                            ],
+                            textposition='auto',
+                            marker_color=[
+                                '#d62728', "#ffdb0e", '#2ca02c'
+                            ]
                         )])
 
-                        fig.update_layout(title='Distribuição de Probabilidade de Risco na Rota', yaxis_title='Probabilidade (%)', yaxis_range=[0,100])
-                        st.plotly_chart(fig, use_container_width=True)
+                        fig.update_layout(
+                            title='Route Risk Probability Distribution',
+                            yaxis_title='Probability (%)',
+                            yaxis_range=[0, 100]
+                        )
 
-                        # Alerta de Risco
-                        classe_predita = nomes_das_classes[risco_agregado.argmax()]
-                        prob_predita = risco_agregado.max()
+                        st.plotly_chart(
+                            fig,
+                            use_container_width=True
+                        )
 
-                        if classe_predita == 'Com Vítimas Fatais':
-                            st.error(f"🚨 **RISCO ALTO**: A maior probabilidade na rota é de acidentes **{classe_predita}** ({prob_predita:.1%}). Redobre a atenção!")
-                        
-                        elif classe_predita == 'Com Vítimas Feridas':
-                            st.warning(f"⚠️ **RISCO MODERADO**: A maior probabilidade na rota é de acidentes **{classe_predita}** ({prob_predita:.1%}). Dirija com cuidado.")
-                        
+                        # Risk alerts
+                        if predicted_class == 'Com Vítimas Fatais':
+                            st.error(
+                                f"🚨 **HIGH RISK**: Highest probability is "
+                                f"**{predicted_class}** ({predicted_prob:.1%}). "
+                                "Increase attention!"
+                            )
+
+                        elif predicted_class == 'Com Vítimas Feridas':
+                            st.warning(
+                                f"⚠️ **MODERATE RISK**: Highest probability is "
+                                f"**{predicted_class}** ({predicted_prob:.1%}). "
+                                "Drive carefully."
+                            )
+
                         else:
-                            st.success(f"✅ **RISCO BAIXO**: A maior probabilidade na rota é de acidentes **{classe_predita}** ({prob_predita:.1%}). Boa viagem!")
+                            st.success(
+                                f"✅ **LOW RISK**: Highest probability is "
+                                f"**{predicted_class}** ({predicted_prob:.1%}). "
+                                "Have a safe trip!"
+                            )
 
-                        with st.expander("Ver detalhes da análise por cenário"):
-                            st.write("A tabela abaixo mostra as probabilidades para cada trecho da rota e cada cenário de risco simulado.")
-                            df_detalhes = pd.DataFrame(probabilidades, columns=nomes_das_classes)
-                            st.dataframe(df_detalhes.style.format("{:.2%}").background_gradient(cmap='YlOrRd', axis=1), use_container_width=True)
+                        with st.expander(
+                            "View scenario-level analysis details"
+                        ):
+                            st.write(
+                                "The table below shows probabilities for each "
+                                "route segment and simulated risk scenario."
+                            )
 
-    # ==========================================================================
-    # ABA 2: HISTÓRICO
+                            df_details = pd.DataFrame(
+                                probabilities,
+                                columns=nomes_das_classes
+                            )
+
+                            st.dataframe(
+                                df_details.style
+                                .format("{:.2%}")
+                                .background_gradient(
+                                    cmap='YlOrRd',
+                                    axis=1
+                                ),
+                                use_container_width=True
+                            ) 
+# ==========================================================================
+    # TAB 2: HISTORY
     # ==========================================================================
     with tab2:
-        st.header("📜 Histórico de Previsões da Sessão")
+        st.header("📜 Session Route Prediction History")
 
         if not st.session_state.historico_rotas:
-            st.info("Nenhuma previsão de rota foi realizada nesta sessão ainda. Faça uma análise na aba ao lado.")
+            st.info(
+                "No route predictions have been made in this session yet. "
+                "Run an analysis in the tab on the left."
+            )
         else:
-            if st.button("🗑️ Limpar Histórico"):
+            if st.button("🗑️ Clear History"):
                 st.session_state.historico_rotas = []
                 st.rerun()
 
-            for i, registro in enumerate(st.session_state.historico_rotas):
-                timestamp_str = registro['timestamp'].strftime('%d/%m/%Y às %H:%M:%S')
-                cor_risco = "red" if registro['classe_predita'] == 'Com Vítimas Fatais' else "orange" if registro['classe_predita'] == 'Com Vítimas Feridas' else "green"
+            for i, record in enumerate(st.session_state.historico_rotas):
+                timestamp_str = record['timestamp'].strftime(
+                    '%d/%m/%Y at %H:%M:%S'
+                )
 
-                expander_title = f"**Previsão #{len(st.session_state.historico_rotas) - i}** ({timestamp_str}) - Risco Dominante: **:{cor_risco}[{registro['classe_predita']}]**"
-                
+                risk_color = (
+                    "red"
+                    if record['predicted_class'] == 'Com Vítimas Fatais'
+                    else "orange"
+                    if record['predicted_class'] == 'Com Vítimas Feridas'
+                    else "green"
+                )
+
+                expander_title = (
+                    f"**Prediction #{len(st.session_state.historico_rotas) - i}** "
+                    f"({timestamp_str}) - Dominant Risk: "
+                    f"**:{risk_color}[{record['predicted_class']}]**"
+                )
+
                 with st.expander(expander_title):
-                    st.write("**Parâmetros da Viagem:**")
-                    st.json(registro['parametros'])
+                    st.write("**Trip Parameters:**")
+                    st.json(record['parameters'])
 
-                    st.write("**Rota Analisada:**")
-                    st.dataframe(registro['rota'], use_container_width=True)
-
-                    st.write("**Resultado da Análise de Risco:**")
-                    df_res_hist = pd.DataFrame([registro['risco_agregado']], columns=nomes_das_classes)
+                    st.write("**Analyzed Route:**")
                     st.dataframe(
-                        df_res_hist.style.format("{:.2%}").background_gradient(cmap='YlOrRd', axis=1),
+                        record['route'],
                         use_container_width=True
                     )
 
-# --- Carregando Artefatos e Classes ---
+                    st.write("**Risk Analysis Result:**")
+                    df_hist = pd.DataFrame(
+                        [record['aggregated_risk']],
+                        columns=nomes_das_classes
+                    )
+
+                    st.dataframe(
+                        df_hist.style
+                        .format("{:.2%}")
+                        .background_gradient(
+                            cmap='YlOrRd',
+                            axis=1
+                        ),
+                        use_container_width=True
+                    ) 
+# --- Predefined Routes ---
 ROTAS_PREDEFINIDAS = {
-        "Viagem SP ➔ RJ (Via Dutra)": [
-            {'uf': 'SP', 'br': 116},
-            {'uf': 'RJ', 'br': 116}
-        ],
-        "Litoral Sul de SP (Régis Bittencourt + Rio-Santos)": [
-            {'uf': 'SP', 'br': 116}, # Trecho da Régis Bittencourt
-            {'uf': 'SP', 'br': 101}  # Trecho da Rio-Santos
-        ],
-        "Viagem PR ➔ SC (Via Litoral)": [
-            {'uf': 'PR', 'br': 116},
-            {'uf': 'PR', 'br': 101},
-            {'uf': 'SC', 'br': 101}
-        ],
-        "Principal Rota de Minas Gerais (Fernão Dias)": [
-            {'uf': 'MG', 'br': 381}
-        ]
+    "Trip SP ➔ RJ (Via Dutra)": [
+        {'uf': 'SP', 'br': 116},
+        {'uf': 'RJ', 'br': 116}
+    ],
+    "South Coast of SP (Régis Bittencourt + Rio-Santos)": [
+        {'uf': 'SP', 'br': 116},
+        {'uf': 'SP', 'br': 101}
+    ],
+    "Trip PR ➔ SC (Coastal Route)": [
+        {'uf': 'PR', 'br': 116},
+        {'uf': 'PR', 'br': 101},
+        {'uf': 'SC', 'br': 101}
+    ],
+    "Main Route of Minas Gerais (Fernão Dias)": [
+        {'uf': 'MG', 'br': 381}
+    ]
 }
-nomes_das_classes = ['Com Vítimas Fatais','Com Vítimas Feridas','Ilesos']
+
+nomes_das_classes = [
+    'Com Vítimas Fatais',
+    'Com Vítimas Feridas',
+    'Ilesos'
+]
+
 modelo, encoder_features, encoder_target, colunas_modelo = load_objects()
 db_brs = carregar_dados_brs()
 
 # ==============================================================================
-# APLICAÇÃO STREAMLIT
+# STREAMLIT APPLICATION
 # ==============================================================================
 pd.set_option("styler.render.max_elements", 2000000)
+
 st.set_page_config(
-    page_title="Modelos de Predição - Análise de Acidentes",
+    page_title="Prediction Models - Accident Analysis",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# --- Header Principal ---
-st.markdown('<div class="main-header">🤖 Modelos de Predição de Gravidade</div>', unsafe_allow_html=True)
-st.markdown("<div style='text-align: center; font-size: 1.2em; color: #666;'>Interaja com os modelos de Machine Learning para prever a gravidade de acidentes em diferentes cenários.</div>", unsafe_allow_html=True)
+# --- Main Header ---
+st.markdown(
+    '<div class="main-header">🤖 Accident Severity Prediction Models</div>',
+    unsafe_allow_html=True
+)
+st.markdown(
+    "<div style='text-align: center; font-size: 1.2em; color: #666;'>"
+    "Interact with Machine Learning models to predict accident severity "
+    "under different scenarios."
+    "</div>",
+    unsafe_allow_html=True
+)
 
-# Verifica se os modelos foram carregados corretamente
+# Check if models were loaded correctly
 if modelo is None:
-    st.error(" Arquivos de modelo não encontrados! Garanta que os arquivos .pkl estão no diretório correto.")
+    st.error(
+        "Model files not found! Make sure the .pkl files are in the correct directory."
+    )
 else:
-    # --- Botão para acionar o Agente IA ---
-    if st.sidebar.button("Conversar com Agente IA"):
+    # --- Button to trigger AI Agent ---
+    if st.sidebar.button("Talk to AI Agent"):
         
-        # A mágica acontece aqui!
         @st.dialog("🤖", width="large")
         def agent_dialog():
-            """Define o conteúdo do pop-up."""
-            # Chamamos a função que renderiza a interface completa do chat
             renderizar_pagina_agente_acidentes()
-        agent_dialog()  # Abre o pop-up quando o botão é clicado
+
+        agent_dialog()
+
     st.sidebar.divider()
 
-    # --- Sidebar para seleção de modo ---
-    st.sidebar.header("Modo de Operação")
+    # --- Sidebar Mode Selection ---
+    st.sidebar.header("Operation Mode")
     input_mode = st.sidebar.radio(
-        "Escolha o tipo de previsão:",
-        ("Previsão em Lote (Upload)", "Previsão de Rota")
+        "Choose prediction type:",
+        ("Batch Prediction (Upload)", "Route Prediction")
     )
     
-    # --- Renderização da página selecionada ---
-    if input_mode == "Previsão em Lote (Upload)":
-        rederizar_pagina_upload_arquivo() 
+    # --- Render Selected Page ---
+    if input_mode == "Batch Prediction (Upload)":
+        rederizar_pagina_upload_arquivo()
 
-    elif input_mode == "Previsão de Rota":
-        renderizar_pagina_entrada_manual()
+    elif input_mode == "Route Prediction":
+        renderizar_pagina_entrada_manual() 

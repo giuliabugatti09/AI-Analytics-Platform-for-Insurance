@@ -24,3 +24,6 @@ tensorflow
 # Web Interface
 streamlit>=1.50.0
 pillow>=10.2.0
+
+google.generativeai
+xlsxwriter
