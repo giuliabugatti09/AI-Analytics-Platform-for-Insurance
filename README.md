@@ -8,6 +8,18 @@
 ## 📝 Executive Summary
 This platform is a comprehensive Deep Learning and Machine Learning solution designed to modernize traffic incident management for the insurance sector. Developed as part of a forensic intelligence simulation, the system integrates computer vision, tabular prediction, and geospatial intelligence to transform raw traffic data into actionable safety insights.
 
+### 🏆 Award-Winning Project & Partnership
+This project was developed for academic purposes as part of a strategic partnership with **Sompo Seguros**. 
+* **Challenge:** FIAP Innovation Challenge (Sompo Seguros).
+* **Recognition:** **3rd Place Winner** (2025).
+* **Objective:** To demonstrate how Artificial Intelligence can optimize claim triaging and enhance road safety for policyholders.
+
+### 🛡️ Data Privacy & Compliance
+All data utilized in this project is **Public Domain**.
+* **Source:** Official datasets released by the **Brazilian Government (PRF - Polícia Rodoviária Federal)** via the Access to Information Law.
+* **Compliance:** There are no PII (Personally Identifiable Information) or sensitive private insurance data issues. All information is anonymized and legally cleared for academic and research purposes.
+
+
 ## 🚀 Key Modules
 
 ### 1. 🔍 Computer Vision Diagnostic
